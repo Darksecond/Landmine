@@ -254,9 +254,6 @@ void vm_step()
 			chkzero(tmp32);
 			chkcarry(tmp32 & 0xf0000);
 			break;
-		case 0x17: //MOV r1, LL
-			reg[a1] = (int16_t)pp;
-			break;
 		//*****************************************************
 		case 0x40: //LPM r1, PP
 			//LPM stands for: Load Program Memory
@@ -296,6 +293,9 @@ void vm_step()
 			{
 				intr[a1] = pp;
 			}
+			break;
+		case 0x48: //MOV r1, LL
+			reg[a1] = (int16_t)pp;
 			break;
 	}
 }
