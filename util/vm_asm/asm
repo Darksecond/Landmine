@@ -1,0 +1,11 @@
+#!/usr/bin/env ruby
+require "./opcode.rb"
+if ARGV.count != 2
+	puts "Please supply an input and an output file"
+else
+	input = ARGV[0]
+	output = ARGV[1]
+	p = Program.read input
+	p.write output
+	puts "done!"
+end
