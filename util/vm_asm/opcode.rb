@@ -202,6 +202,10 @@ class Program
 	def self.from_raw(raw)
 		Program.new raw
 	end
+	
+	def self.read(filename)
+		Program.new File.open filename
+	end
 
 	attr_reader :prog
 
@@ -261,5 +265,13 @@ class Program
 	def assemble
 		pass1
 		pass2
+	end
+
+	def write(filename)
+		File.open filename, "wb" do |file|
+			assemble.each do |byte|
+				file.print byte.chr
+			end
+		end
 	end
 end
