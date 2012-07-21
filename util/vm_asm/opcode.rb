@@ -22,6 +22,18 @@ class Opcode
 		@@handles.fetch(raw).new(*args)
 	end
 
+	def self.opcode_matcher(opcode, matcher)
+		@opcodes ||= {}
+		@opcodes[matcher] = opcode
+	end
+
+	def self.get_opcode(arguments)
+		matcher = arguments.map { |a| a.class }
+		@opcodes.fetch matcher
+	end
+
+	attr_accessor :location
+
 	def initialize(*args)
 		@args = args
 	end
@@ -30,10 +42,8 @@ class Opcode
 		@args ||= []
 	end
 
-	def matcher
-		arguments.map do |a|
-			a.class
-		end
+	def opcode
+		self.class.get_opcode(arguments)
 	end
 	
 	def assemble
@@ -52,123 +62,204 @@ class Opcode
 		end
 		output
 	end
+
+	def length
+		return 1 + arguments.inject(0) { |sum, arg| sum + arg.length }
+	end
 end
 
-class MOV < Opcode
-	handle "mov"
-	min 2
-	max 2
+class Argument
+	def self.handle(&block)
+		@@handles ||= []
+		@@handles << block
+	end
 
-	def opcode
-		case matcher
-		when [Register, Register]
-			0x20
-		when [Register, Pointer]
-			0x21
-		when [Pointer, Register]
-			0x22
-		when [Register, Short]
-			0x23
-		when [Register, Long]
-			0x48
+	def self.length(length = nil, &block)
+		if block == nil
+			send :define_method, :length do
+				length
+			end
 		else
-			nil
+			send :define_method, :length, block
 		end
 	end
+
+	def self.parse_argument(arg, prog)
+		argument = @@handles.map { |handle| handle.call(arg.strip, prog) }.compact.first
+		if argument.class == nil
+			raise "argument invalid: #{arg}"
+		else
+			argument
+		end
+	end
+
+	def self.parse_arguments(args, prog)
+		args.map do |arg|
+			parse_argument(arg, prog)
+		end
+	end
+
+	def initialize(value, prog=nil)
+		@prog = prog
+		@value = value
+	end
 end
 
-class Register
-	def initialize(register)
-		@reg = register.to_i
+class Register < Argument
+	handle do |argument|
+		if argument[0] == "r"
+			Register.new argument[1..-1].to_i
+		end
 	end
+	length 1
 	
 	def assemble
-		[@reg-1]
+		[@value-1]
 	end
 end
 
-class Pointer
-	def initialize(value)
-		@value = value
+class Pointer < Argument
+	handle do |argument, prog|
+		if argument[0] == "["
+			Pointer.new Argument.parse_argument(argument[1..-2], prog)
+		end
+	end
+
+	length do
+		@value.length
 	end
 
 	def assemble
 		@value.assemble
 	end
-
 end
 
-class Short
-	def initialize(value)
-		@value = value.to_i
+class Short < Argument
+	handle do |argument|
+		begin
+			num = Float(argument).to_i
+			if (num & 0xff) == num
+				Short.new num
+			end
+		rescue
+			nil
+		end
 	end
+	
+	length 1
 
 	def assemble
 		[(@value & 0xff)]
 	end
 end
 
-class Long
-	def initialize(value)
-		@value = value.to_i
+class Long < Argument
+	handle do |argument|
+		begin
+			num = Float(argument).to_i
+			Long.new num
+		rescue
+			nil
+		end
 	end
+
+	length 2
 
 	def assemble
 		[((@value >> 8 ) & 0xff), (@value & 0xff)]
 	end
 end
 
-class Program
-	def self.from_raw(raw)
-		prog = Program.new
-		raw.split("\n").each do |line|
-			split = line.split(" ")
-			raw_opcode = split.first
-			raw_arguments = split[1..split.count-1].join.split(",")
-			#parse arguments!
-			arguments = []
-			raw_arguments.each do |arg|
-				arguments << parse_argument(arg)
-			end
-			opcode = Opcode.from_raw(raw_opcode, *arguments)
-			prog.prog << opcode
-		end
-		prog
-	end
-
-	def self.parse_argument(arg)
-		begin
-			num = Float(arg).to_i
-		rescue
-			num = nil
-		end
-		if arg[0] == "r"
-			Register.new(arg[1..-1])
-		elsif arg[0] == "["
-			Pointer.new(parse_argument(arg[1..-2]))
-		elsif num
-			#we need to see if num is a short, or a long
-			if (num & 0xff) == num
-				Short.new(num)
-			else
-				Long.new(num)
-			end
-		else
-			raise "argument invalid"
+class LabelReference < Argument
+	handle do |argument, prog|
+		if argument[0] == "@"
+			LabelReference.new argument[1..-1], prog
 		end
 	end
 
-	def initialize()
-		@prog = []
-	end
-
-	def prog
-		@prog
-	end
+	length 2
 
 	def assemble
-		prog.map do |opcode|
-			opcode.assemble
-		end.flatten
+		opcode = @prog.label @value
+		upper = (opcode.location >> 8) & 0xff
+		lower = opcode.location & 0xff
+		[upper, lower]
+	end
+end
+
+class MOV < Opcode
+	handle "mov"
+	min 2
+	max 2
+	opcode_matcher 0x20, [Register, Register]
+	opcode_matcher 0x21, [Register, Pointer]
+	opcode_matcher 0x22, [Pointer, Register]
+	opcode_matcher 0x23, [Register, Short]
+	opcode_matcher 0x48, [Register, Long]
+end
+
+class Program
+	def self.from_raw(raw)
+		Program.new raw
+	end
+
+	attr_reader :prog
+
+	def initialize(prog)
+		if prog.class == Array
+			@prog = prog
+		else
+			@prog = parse(prog)
+		end
+	end
+
+	def parse(raw)
+		if raw.class == String
+			raw = raw.split("\n")
+		end
+
+		raw.map { |line| parse_line line }.flatten.compact
+	end
+
+	def parse_line(line)
+		line = line.strip
+		if line[-1] == ":" #label
+			@label = line[0..-2]
+			nil
+		else
+			split = line.split(" ")
+			arguments = Argument.parse_arguments(split[1..-1].join.split(","), self)
+			opcode = Opcode.from_raw(split.first.strip, *arguments)
+			if @label
+				labels[@label] = opcode
+				@label = nil
+			end
+			opcode
+		end
+	end
+
+	def labels
+		@labels ||= {}
+	end
+
+	def label(label)
+		labels.fetch label
+	end
+
+	def pass1
+		cur = 0;
+		prog.each { |opcode|
+			opcode.location = cur
+			cur += opcode.length
+		}
+	end
+
+	def pass2
+		prog.map { |opcode| opcode.assemble }.flatten
+	end
+	
+	def assemble
+		pass1
+		pass2
 	end
 end
