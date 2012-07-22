@@ -40,6 +40,7 @@ void push(int16_t value)
 //check if value is zero, and set the zero flag accordingly
 void chkzero(int16_t value)
 {
+	//SREG!
 	if (value == 0)
 	{
 		FLAGS = FLAGS|F_ZERO;
