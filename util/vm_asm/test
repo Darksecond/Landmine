@@ -1,0 +1,5 @@
+mov r4, r5
+mov r6, r7
+mov r8, [r9]
+mov r10, 123
+mov r11, 567

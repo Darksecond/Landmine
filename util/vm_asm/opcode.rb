@@ -1,16 +1,4 @@
 class Opcode
-	def self.min(value)
-		send :define_method, :min do
-			value
-		end
-	end
-
-	def self.max(value)
-		send :define_method, :max do
-			value
-		end
-	end
-
 	def self.handle(*args)
 		@@handles ||= {}
 		args.each do |raw|
@@ -28,11 +16,24 @@ class Opcode
 	end
 
 	def self.get_opcode(arguments)
-		matcher = arguments.map { |a| a.class }
+		matcher = arguments.map { |a| a.type }
 		@opcodes.fetch matcher
 	end
 
+	def self.sizes
+		sizes = @opcodes.keys.map { |m| m.count }
+		[sizes.min, sizes.max]
+	end
+
 	attr_accessor :location
+
+	def min
+		self.class.sizes[0]
+	end
+	
+	def max
+		self.class.sizes[1]
+	end
 
 	def initialize(*args)
 		@args = args
@@ -51,16 +52,12 @@ class Opcode
 			raise "argument count out of range"
 		end
 
-		output = [nil]
-		arguments.each do |arg|
-			output += arg.assemble
-		end
-
-		output[0] = opcode
+		output = [opcode]
 		if output[0] == nil
 			raise "opcode invalid"
 		end
-		output
+
+		arguments.inject(output) { |out, arg| out << arg.assemble }
 	end
 
 	def length
@@ -102,6 +99,10 @@ class Argument
 	def initialize(value, prog=nil)
 		@prog = prog
 		@value = value
+	end
+
+	def type
+		self.class
 	end
 end
 
@@ -170,27 +171,31 @@ class Long < Argument
 	end
 end
 
-class LabelReference < Argument
+class Reference < Argument
 	handle do |argument, prog|
 		if argument[0] == "@"
-			LabelReference.new argument[1..-1], prog
+			Reference.new argument[1..-1], prog
 		end
 	end
 
 	length 2
 
 	def assemble
-		opcode = @prog.label @value
-		upper = (opcode.location >> 8) & 0xff
-		lower = opcode.location & 0xff
+		begin
+			num = Float(@value).to_i
+			upper = (num >> 8) & 0xff
+			lower = num & 0xff
+		rescue
+			opcode = @prog.label @value
+			upper = (opcode.location >> 8) & 0xff
+			lower = opcode.location & 0xff
+		end
 		[upper, lower]
 	end
 end
 
 class MOV < Opcode
 	handle "mov"
-	min 2
-	max 2
 	opcode_matcher 0x20, [Register, Register]
 	opcode_matcher 0x21, [Register, Pointer]
 	opcode_matcher 0x22, [Pointer, Register]
