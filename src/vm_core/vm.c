@@ -84,7 +84,10 @@ void vm_interrupt(uint8_t interrupt)
 	if (FLAGS & F_IE)
 	{
 		//enable interrupt
-		IE = IE | (1 << interrupt);
+		if(intr[interrupt]) //check if the interrupt is actually used in the VM
+		{
+			IE = IE | (1 << interrupt);
+		}
 	}
 }
 
