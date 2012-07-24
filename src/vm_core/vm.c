@@ -16,11 +16,13 @@
 
 uint16_t intr[MAX_INT]; //interrupts
 int16_t reg[MAX_REG]; //registers
+uint32_t* reg_u32 = (uint32_t*)reg; //0-127
 
 //these registers hold important values
 #define PC reg[0]
 #define SP reg[1]
 #define FLAGS reg[2]
+#define IE reg_u32[127]
 
 #define F_ZERO 1
 #define F_CARRY 2
@@ -76,12 +78,22 @@ uint8_t vm_running()
 	}
 }
 
+void vm_interrupt(uint8_t interrupt)
+{
+	//check if F_IE is enabled
+	if (FLAGS & F_IE)
+	{
+		//enable interrupt
+		IE = IE | (1 << interrupt);
+	}
+}
+
 void vm_reset()
 {
 	PC = 0;
 	//reserve the top few bytes for interrupt-counting?
 	//or for something else?
-	SP = 252; 
+	SP = 251; 
 	FLAGS = 0;
 
 	//reset interrupts
@@ -97,6 +109,24 @@ void vm_step()
 #ifdef DBG_VM
 	printf("PC=0x%04X ", PC);
 #endif
+	//handle potential interrupts
+	if(IE && (FLAGS & F_IE))
+	{
+		int i;
+		for(i = 0; i < MAX_INT; i++)
+		{
+			if(IE & (1 << i))
+			{
+				IE = (IE & (~(1 << i)));
+				push(FLAGS);
+				push(PC);
+				//push scratch registers
+				PC = intr[i];
+				FLAGS = FLAGS & ~(F_IE);
+				break;
+			}
+		}
+	}
 
 	uint8_t num_args;
 	uint8_t a1, a2, a3, a4;
@@ -230,7 +260,7 @@ void vm_step()
 		case 0x2E: //JNE PP
 			if (!(FLAGS & F_ZERO))
 			{
-				PC = pp;;
+				PC = pp;
 			}
 			break;
 		case 0x2F: //JO PP
